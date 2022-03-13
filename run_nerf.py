@@ -35,7 +35,7 @@ def main():
     
     # Hyperparameters
     # Training
-    num_iters = 10000 # 300000
+    num_iters = 1000 # 300000
     eval_every = 100
     chunk_size = 1024 * 32 # Number of query points passed through the MLP at a time
     batch_img_size = 32 # Number of training rays per iteration
@@ -59,7 +59,6 @@ def main():
     train_poses, train_imgs = train_set
     val_poses, val_imgs = val_set
     img_size = train_imgs.shape[1]
-    eval_idx = [0, 1] # Images from validation set used for evaluation during training
 
     # Set up initial ray origin (init_o) and ray directions (init_ds). These are the
     # same across samples, we just rotate them based on the orientation of the camera.
@@ -74,17 +73,6 @@ def main():
     init_ds = camera_coords.to(device)
     init_o = torch.Tensor(np.array([0, 0, camera_dis])).to(device)
 
-    # Set up two evaluation samples from validation set to track the progress.
-    print(f"Evaluating with val image {eval_idx[0]} and {eval_idx[1]}")
-    eval_img_1 = torch.Tensor(val_imgs[eval_idx[0]]).to(device)
-    eval_R_1 = torch.Tensor(val_poses[eval_idx[0], :3, :3]).to(device)
-    eval_ds_1 = torch.einsum("ij,hwj->hwi", eval_R_1, init_ds)
-    eval_os_1 = (eval_R_1 @ init_o).expand(eval_ds_1.shape)
-    eval_img_2 = torch.Tensor(val_imgs[eval_idx[1]]).to(device)
-    eval_R_2 = torch.Tensor(val_poses[eval_idx[1], :3, :3]).to(device)
-    eval_ds_2 = torch.einsum("ij,hwj->hwi", eval_R_2, init_ds)
-    eval_os_2 = (eval_R_2 @ init_o).expand(eval_ds_2.shape)
-
     # Initialize coarse and fine MLPs.
     F_c = get_model(device)
     F_f = get_model(device)
@@ -98,9 +86,11 @@ def main():
     t_i_c_bin_edges = (t_n + torch.arange(N_c) * t_i_c_gap).to(device)
 
     # Start training model.
-    # Variables used for sample batch of rays
+    # Preparation
     images = torch.Tensor(train_imgs)
     poses = torch.Tensor(train_poses)
+    val_imgs = torch.Tensor(val_imgs)
+    val_poses = torch.Tensor(val_poses)
     n_pix = img_size**2
     pixel_ps = torch.full((n_pix,), 1 / n_pix).to(device)
 
@@ -162,38 +152,42 @@ def main():
             g["lr"] = lr * decay_rate ** (i / decay_steps)
 
         if i % eval_every == 0:
+            # Choose two random samples from validation set to use for evaluation
+            eval_idx = torch.randint(0, 100, (2,))
+            eval_imgs = val_imgs[eval_idx]
+            eval_poses = val_poses[eval_idx]
+            C_rs_fs = []
             F_c.eval()
             F_f.eval()
-            with torch.no_grad():
-                (_, C_rs_f_1, depth_map_1) = run_one_iter_of_nerf(
-                    eval_ds_1,
-                    N_c,
-                    t_i_c_bin_edges,
-                    t_i_c_gap,
-                    eval_os_1,
-                    chunk_size,
-                    F_c,
-                    N_f,
-                    t_f,
-                    F_f,
-                )
+            for eval_pose in eval_poses:
+                eval_R = eval_pose[:3, :3].to(device)
+                eval_ds = torch.einsum("ij,hwj->hwi", eval_R, init_ds)
+                eval_os = (eval_R @ init_o).expand(eval_ds.shape)
 
-                (_, C_rs_f_2, depth_map_2) = run_one_iter_of_nerf(
-                    eval_ds_2,
-                    N_c,
-                    t_i_c_bin_edges,
-                    t_i_c_gap,
-                    eval_os_2,
-                    chunk_size,
-                    F_c,
-                    N_f,
-                    t_f,
-                    F_f,
-                )
+                # # Generate one row of the map at a time to avoid out of memory
+                # C_rs_f = []
+                # depth_map = []
+                # for i in range(len(eval_pose)):
+                with torch.no_grad():
+                    (_, C_rs_f, _) = run_one_iter_of_nerf(
+                        eval_ds,
+                        N_c,
+                        t_i_c_bin_edges,
+                        t_i_c_gap,
+                        eval_os,
+                        chunk_size,
+                        F_c,
+                        N_f,
+                        t_f,
+                        F_f,
+                    )
 
+                C_rs_fs.append(C_rs_f)
+
+            eval_imgs = eval_imgs.to(device)
             iternums.append(i)
-            loss_1 = criterion(C_rs_f_1, eval_img_1)
-            loss_2 = criterion(C_rs_f_2, eval_img_2)
+            loss_1 = criterion(C_rs_fs[0], eval_imgs[0])
+            loss_2 = criterion(C_rs_fs[1], eval_imgs[1])
             val_loss = loss_1.item() + loss_2.item()
             val_losses.append(val_loss)
             print(f"progress: {i}/{num_iters}, validation loss: {val_loss / 2}")
@@ -205,50 +199,67 @@ def main():
             # Visualization
             plt.figure(figsize=(16, 9), constrained_layout=True)
             plt.suptitle(f"Iteration 1 to {i}")
-            plt.subplot(241)
-            plt.title(f"Image 1 Ground Truth")
-            plt.imshow(eval_img_1.detach().cpu().numpy())
-            plt.subplot(242)
-            plt.title(f"Image 1 Predicted RGB Map")
-            plt.imshow(C_rs_f_1.detach().cpu().numpy())
-            plt.subplot(243)
-            plt.title(f"Image 1 Predicted Depth Map")
-            plt.imshow(depth_map_1.detach().cpu().numpy())
-            plt.subplot(244)
-            plt.title("Image 1 PSNR")
+            plt.subplot(231)
+            plt.title(f"Validation Image {eval_idx[0]} Ground Truth")
+            plt.imshow(eval_imgs[0].detach().cpu().numpy())
+            plt.subplot(232)
+            plt.title(f"Validation Image {eval_idx[0]} Predicted RGB Map")
+            plt.imshow(C_rs_fs[0].detach().cpu().numpy())
+            plt.subplot(233)
+            plt.title(f"Validation Image {eval_idx[0]} PSNR")
             plt.plot(iternums, psnrs_1)
-            plt.subplot(245)
-            plt.title(f"Image 1 Ground Truth")
-            plt.imshow(eval_img_2.detach().cpu().numpy())
-            plt.subplot(246)
-            plt.title(f"Image 2 Predicted RGB Map")
-            plt.imshow(C_rs_f_2.detach().cpu().numpy())
-            plt.subplot(247)
-            plt.title(f"Image 2 Predicted Depth Map")
-            plt.imshow(depth_map_2.detach().cpu().numpy())
-            plt.subplot(248)
-            plt.title("Image 2 PSNR")
+            plt.subplot(234)
+            plt.title(f"Validation Image {eval_idx[1]} Ground Truth")
+            plt.imshow(eval_imgs[1].detach().cpu().numpy())
+            plt.subplot(235)
+            plt.title(f"Validation Image {eval_idx[1]} Predicted RGB Map")
+            plt.imshow(C_rs_fs[1].detach().cpu().numpy())
+            plt.subplot(236)
+            plt.title(f"Validation Image {eval_idx[1]} PSNR")
             plt.plot(iternums, psnrs_2)
-            plt.savefig("log/evaluation.png")
+            plt.savefig(f"log/evaluation/iter_{i}_evaluation.png")
+            plt.close()
 
             plt.figure()
             plt.plot(iternums, val_losses)
             plt.savefig("log/validation_loss.png")
+            plt.close()
 
             F_c.train()
             F_f.train()
 
             # Save model
-            torch.save(F_c.state_dict(), "log/latest_coarse.pt")
-            torch.save(F_f.state_dict(), "log/latest_fine.pt")
+            torch.save(F_c.state_dict(), "log/model/latest_coarse.pt")
+            torch.save(F_f.state_dict(), "log/model/latest_fine.pt")
             if (len(val_losses) == 0 or val_loss <= min(val_losses)):
-                torch.save(F_c.state_dict(), "log/best_coarse.pt")
-                torch.save(F_f.state_dict(), "log/best_fine.pt")
+                torch.save(F_c.state_dict(), "log/model/best_coarse.pt")
+                torch.save(F_f.state_dict(), "log/model/best_fine.pt")
+
+    print("Training complete!")
 
     # Generate test views.
-
-    print("Done!")
-
+    print("Generating predictions for test poses...")
+    test_poses = torch.Tensor(test_poses)
+    for i, test_pose in enumerate(test_poses):
+        print(f"Generating prediction {i}...")
+        test_R = test_pose[:3, :3].to(device)
+        test_ds = torch.einsum("ij,hwj->hwi", test_R, init_ds)
+        test_os = (test_R @ init_o).expand(test_ds.shape)
+        with torch.no_grad():
+            (_, C_rs_f, depth_map) = run_one_iter_of_nerf(
+                test_ds,
+                N_c,
+                t_i_c_bin_edges,
+                t_i_c_gap,
+                test_os,
+                chunk_size,
+                F_c,
+                N_f,
+                t_f,
+                F_f,
+            )
+        plt.imsave(f"result/rgb_map_{i}.png", C_rs_f.detach().cpu().numpy())
+        plt.imsave(f"result/depth_map_{i}.png", depth_map.detach().cpu().numpy())
 
 if __name__ == "__main__":
     main()

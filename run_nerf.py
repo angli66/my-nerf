@@ -16,12 +16,12 @@ def run_one_iter_of_nerf(
     ds, N_c, t_i_c_bin_edges, t_i_c_gap, os, chunk_size, F_c, N_f, t_f, F_f
 ):
     (r_ts_c, t_is_c) = get_coarse_query_points(ds, N_c, t_i_c_bin_edges, t_i_c_gap, os)
-    (C_rs_c, w_is_c) = render_radiance_volume(r_ts_c, ds, chunk_size, F_c, t_is_c)
+    (C_rs_c, w_is_c, _) = render_radiance_volume(r_ts_c, ds, chunk_size, F_c, t_is_c)
 
     (r_ts_f, t_is_f) = get_fine_query_points(w_is_c, N_f, t_is_c, t_f, os, ds)
-    (C_rs_f, _) = render_radiance_volume(r_ts_f, ds, chunk_size, F_f, t_is_f)
+    (C_rs_f, _, depth_map) = render_radiance_volume(r_ts_f, ds, chunk_size, F_f, t_is_f)
 
-    return (C_rs_c, C_rs_f)
+    return (C_rs_c, C_rs_f, depth_map)
 
 
 def main():
@@ -36,7 +36,7 @@ def main():
     # Hyperparameters
     # Training
     num_iters = 10000 # 300000
-    display_every = 100
+    eval_every = 100
     chunk_size = 1024 * 32 # Number of query points passed through the MLP at a time
     batch_img_size = 32 # Number of training rays per iteration
     n_batch_pix = batch_img_size**2
@@ -76,12 +76,10 @@ def main():
 
     # Set up two evaluation samples from validation set to track the progress.
     print(f"Evaluating with val image {eval_idx[0]} and {eval_idx[1]}")
-    
     eval_img_1 = torch.Tensor(val_imgs[eval_idx[0]]).to(device)
     eval_R_1 = torch.Tensor(val_poses[eval_idx[0], :3, :3]).to(device)
     eval_ds_1 = torch.einsum("ij,hwj->hwi", eval_R_1, init_ds)
     eval_os_1 = (eval_R_1 @ init_o).expand(eval_ds_1.shape)
-
     eval_img_2 = torch.Tensor(val_imgs[eval_idx[1]]).to(device)
     eval_R_2 = torch.Tensor(val_poses[eval_idx[1], :3, :3]).to(device)
     eval_ds_2 = torch.einsum("ij,hwj->hwi", eval_R_2, init_ds)
@@ -100,15 +98,21 @@ def main():
     t_i_c_bin_edges = (t_n + torch.arange(N_c) * t_i_c_gap).to(device)
 
     # Start training model.
+    # Variables used for sample batch of rays
     images = torch.Tensor(train_imgs)
     poses = torch.Tensor(train_poses)
     n_pix = img_size**2
     pixel_ps = torch.full((n_pix,), 1 / n_pix).to(device)
+
+    # Log list
+    iternums = []
+    val_losses = []
     psnrs_1 = []
     psnrs_2 = []
-    iternums = []
+
     F_c.train()
     F_f.train()
+    print("Start training...")
     for i in range(num_iters):
         # Sample image and associated pose.
         target_img_idx = np.random.randint(images.shape[0])
@@ -131,7 +135,7 @@ def main():
         )
 
         # Run NeRF.
-        (C_rs_c, C_rs_f) = run_one_iter_of_nerf(
+        (C_rs_c, C_rs_f, _) = run_one_iter_of_nerf(
             ds_batch,
             N_c,
             t_i_c_bin_edges,
@@ -157,11 +161,11 @@ def main():
         for g in optimizer.param_groups:
             g["lr"] = lr * decay_rate ** (i / decay_steps)
 
-        if i % display_every == 0:
+        if i % eval_every == 0:
             F_c.eval()
             F_f.eval()
             with torch.no_grad():
-                (_, C_rs_f_1) = run_one_iter_of_nerf(
+                (_, C_rs_f_1, depth_map_1) = run_one_iter_of_nerf(
                     eval_ds_1,
                     N_c,
                     t_i_c_bin_edges,
@@ -174,7 +178,7 @@ def main():
                     F_f,
                 )
 
-                (_, C_rs_f_2) = run_one_iter_of_nerf(
+                (_, C_rs_f_2, depth_map_2) = run_one_iter_of_nerf(
                     eval_ds_2,
                     N_c,
                     t_i_c_bin_edges,
@@ -187,11 +191,12 @@ def main():
                     F_f,
                 )
 
+            iternums.append(i)
             loss_1 = criterion(C_rs_f_1, eval_img_1)
             loss_2 = criterion(C_rs_f_2, eval_img_2)
-            print(f"Loss: {loss_1.item() + loss_2.item() / 2}")
-
-            iternums.append(i)
+            val_loss = loss_1.item() + loss_2.item()
+            val_losses.append(val_loss)
+            print(f"progress: {i}/{num_iters}, validation loss: {val_loss / 2}")
             psnr_1 = -10.0 * torch.log10(loss_1)
             psnr_2 = -10.0 * torch.log10(loss_2)
             psnrs_1.append(psnr_1.item())
@@ -199,29 +204,48 @@ def main():
 
             # Visualization
             plt.figure(figsize=(16, 9), constrained_layout=True)
-            plt.suptitle(f"Iteration {i}")
-            plt.subplot(231)
+            plt.suptitle(f"Iteration 1 to {i}")
+            plt.subplot(241)
             plt.title(f"Image 1 Ground Truth")
             plt.imshow(eval_img_1.detach().cpu().numpy())
-            plt.subplot(232)
-            plt.title(f"Image 1 Predicted RGB map")
+            plt.subplot(242)
+            plt.title(f"Image 1 Predicted RGB Map")
             plt.imshow(C_rs_f_1.detach().cpu().numpy())
-            plt.subplot(233)
+            plt.subplot(243)
+            plt.title(f"Image 1 Predicted Depth Map")
+            plt.imshow(depth_map_1.detach().cpu().numpy())
+            plt.subplot(244)
             plt.title("Image 1 PSNR")
             plt.plot(iternums, psnrs_1)
-            plt.subplot(234)
+            plt.subplot(245)
             plt.title(f"Image 1 Ground Truth")
             plt.imshow(eval_img_2.detach().cpu().numpy())
-            plt.subplot(235)
-            plt.title(f"Image 2 Predicted RGB map")
+            plt.subplot(246)
+            plt.title(f"Image 2 Predicted RGB Map")
             plt.imshow(C_rs_f_2.detach().cpu().numpy())
-            plt.subplot(236)
+            plt.subplot(247)
+            plt.title(f"Image 2 Predicted Depth Map")
+            plt.imshow(depth_map_2.detach().cpu().numpy())
+            plt.subplot(248)
             plt.title("Image 2 PSNR")
             plt.plot(iternums, psnrs_2)
-            plt.show()
+            plt.savefig("log/evaluation.png")
+
+            plt.figure()
+            plt.plot(iternums, val_losses)
+            plt.savefig("log/validation_loss.png")
 
             F_c.train()
             F_f.train()
+
+            # Save model
+            torch.save(F_c.state_dict(), "log/latest_coarse.pt")
+            torch.save(F_f.state_dict(), "log/latest_fine.pt")
+            if (len(val_losses) == 0 or val_loss <= min(val_losses)):
+                torch.save(F_c.state_dict(), "log/best_coarse.pt")
+                torch.save(F_f.state_dict(), "log/best_fine.pt")
+
+    # Generate test views.
 
     print("Done!")
 

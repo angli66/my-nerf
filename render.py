@@ -56,8 +56,11 @@ def render_radiance_volume(r_ts, ds, chunk_size, F, t_is):
     # (c_is). See Equation (5) in Section 5.2: C_c_hat(r) = Σ w_i * c_i.
     C_rs = (w_is[..., None] * c_is).sum(dim=-2)
 
+    # Estimate depth map is expected distance.
+    depth_map = torch.sum(w_is * t_is, -1)
+
     # Reverse the color map for white background images.
     acc_map = torch.sum(w_is, -1)
     C_rs = C_rs + (1. - acc_map[..., None])
 
-    return (C_rs, w_is)
+    return (C_rs, w_is, depth_map)

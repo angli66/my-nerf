@@ -36,6 +36,7 @@ def main():
     # Hyperparameters
     # Training
     num_iters = 10000 # 300000
+    display_every = 100
     chunk_size = 1024 * 32 # Number of query points passed through the MLP at a time
     batch_img_size = 32 # Number of training rays per iteration
     n_batch_pix = batch_img_size**2
@@ -58,6 +59,7 @@ def main():
     train_poses, train_imgs = train_set
     val_poses, val_imgs = val_set
     img_size = train_imgs.shape[1]
+    eval_idx = [0, 1] # Images from validation set used for evaluation during training
 
     # Set up initial ray origin (init_o) and ray directions (init_ds). These are the
     # same across samples, we just rotate them based on the orientation of the camera.
@@ -72,15 +74,18 @@ def main():
     init_ds = camera_coords.to(device)
     init_o = torch.Tensor(np.array([0, 0, camera_dis])).to(device)
 
-    # Set up an evaluation sample from validation set to track the progress.
-    val_idx = 0
-    plt.imshow(val_imgs[val_idx])
-    plt.show()
-    test_img = torch.Tensor(val_imgs[val_idx]).to(device)
-    poses = val_poses
-    test_R = torch.Tensor(poses[val_idx, :3, :3]).to(device)
-    test_ds = torch.einsum("ij,hwj->hwi", test_R, init_ds)
-    test_os = (test_R @ init_o).expand(test_ds.shape)
+    # Set up two evaluation samples from validation set to track the progress.
+    print(f"Evaluating with val image {eval_idx[0]} and {eval_idx[1]}")
+    
+    eval_img_1 = torch.Tensor(val_imgs[eval_idx[0]]).to(device)
+    eval_R_1 = torch.Tensor(val_poses[eval_idx[0], :3, :3]).to(device)
+    eval_ds_1 = torch.einsum("ij,hwj->hwi", eval_R_1, init_ds)
+    eval_os_1 = (eval_R_1 @ init_o).expand(eval_ds_1.shape)
+
+    eval_img_2 = torch.Tensor(val_imgs[eval_idx[1]]).to(device)
+    eval_R_2 = torch.Tensor(val_poses[eval_idx[1], :3, :3]).to(device)
+    eval_ds_2 = torch.einsum("ij,hwj->hwi", eval_R_2, init_ds)
+    eval_os_2 = (eval_R_2 @ init_o).expand(eval_ds_2.shape)
 
     # Initialize coarse and fine MLPs.
     F_c = get_model(device)
@@ -99,9 +104,9 @@ def main():
     poses = torch.Tensor(train_poses)
     n_pix = img_size**2
     pixel_ps = torch.full((n_pix,), 1 / n_pix).to(device)
-    psnrs = []
+    psnrs_1 = []
+    psnrs_2 = []
     iternums = []
-    display_every = 1000
     F_c.train()
     F_f.train()
     for i in range(num_iters):
@@ -156,12 +161,12 @@ def main():
             F_c.eval()
             F_f.eval()
             with torch.no_grad():
-                (_, C_rs_f) = run_one_iter_of_nerf(
-                    test_ds,
+                (_, C_rs_f_1) = run_one_iter_of_nerf(
+                    eval_ds_1,
                     N_c,
                     t_i_c_bin_edges,
                     t_i_c_gap,
-                    test_os,
+                    eval_os_1,
                     chunk_size,
                     F_c,
                     N_f,
@@ -169,25 +174,50 @@ def main():
                     F_f,
                 )
 
-            loss = criterion(C_rs_f, test_img)
-            print(f"Loss: {loss.item()}")
-            psnr = -10.0 * torch.log10(loss)
+                (_, C_rs_f_2) = run_one_iter_of_nerf(
+                    eval_ds_2,
+                    N_c,
+                    t_i_c_bin_edges,
+                    t_i_c_gap,
+                    eval_os_2,
+                    chunk_size,
+                    F_c,
+                    N_f,
+                    t_f,
+                    F_f,
+                )
 
-            psnrs.append(psnr.item())
+            loss_1 = criterion(C_rs_f_1, eval_img_1)
+            loss_2 = criterion(C_rs_f_2, eval_img_2)
+            print(f"Loss: {loss_1.item() + loss_2.item() / 2}")
+
             iternums.append(i)
+            psnr_1 = -10.0 * torch.log10(loss_1)
+            psnr_2 = -10.0 * torch.log10(loss_2)
+            psnrs_1.append(psnr_1.item())
+            psnrs_2.append(psnr_2.item())
 
-            plt.figure(figsize=(10, 4))
-            plt.subplot(121)
-            plt.imshow(C_rs_f.detach().cpu().numpy())
-
-            # debug
-            print(np.max(C_rs_f.detach().cpu().numpy()))
-            print(np.min(C_rs_f.detach().cpu().numpy()))
-
-            plt.title(f"Iteration {i}")
-            plt.subplot(122)
-            plt.plot(iternums, psnrs)
-            plt.title("PSNR")
+            # Visualization
+            plt.figure(figsize=(16, 9), constrained_layout=True)
+            plt.suptitle(f"Iteration {i}")
+            plt.subplot(231)
+            plt.title(f"Image 1 Ground Truth")
+            plt.imshow(eval_img_1.detach().cpu().numpy())
+            plt.subplot(232)
+            plt.title(f"Image 1 Predicted RGB map")
+            plt.imshow(C_rs_f_1.detach().cpu().numpy())
+            plt.subplot(233)
+            plt.title("Image 1 PSNR")
+            plt.plot(iternums, psnrs_1)
+            plt.subplot(234)
+            plt.title(f"Image 1 Ground Truth")
+            plt.imshow(eval_img_2.detach().cpu().numpy())
+            plt.subplot(235)
+            plt.title(f"Image 2 Predicted RGB map")
+            plt.imshow(C_rs_f_2.detach().cpu().numpy())
+            plt.subplot(236)
+            plt.title("Image 2 PSNR")
+            plt.plot(iternums, psnrs_2)
             plt.show()
 
             F_c.train()

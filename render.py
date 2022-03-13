@@ -1,11 +1,7 @@
 # This code is mainly referencing to:
 # https://github.com/airalcorn2/pytorch-nerf
 
-import matplotlib.pyplot as plt
-import numpy as np
 import torch
-import torch.nn as nn
-import torch.optim as optim
 
 def render_radiance_volume(r_ts, ds, chunk_size, F, t_is):
     # Use the network (F) to predict colors (c_is) and volume densities (sigma_is) for
@@ -60,7 +56,7 @@ def render_radiance_volume(r_ts, ds, chunk_size, F, t_is):
     # (c_is). See Equation (5) in Section 5.2: C_c_hat(r) = Σ w_i * c_i.
     C_rs = (w_is[..., None] * c_is).sum(dim=-2)
 
-    # Reverse the color map for white background images
+    # Reverse the color map for white background images.
     acc_map = torch.sum(w_is, -1)
     C_rs = C_rs + (1. - acc_map[..., None])
 

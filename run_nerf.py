@@ -72,19 +72,15 @@ def main():
     init_ds = camera_coords.to(device)
     init_o = torch.Tensor(np.array([0, 0, camera_dis])).to(device)
 
-    # Set up test view.
-    test_idx = 0
-    plt.imshow(val_imgs[test_idx])
+    # Set up an evaluation sample from validation set to track the progress.
+    val_idx = 0
+    plt.imshow(val_imgs[val_idx])
     plt.show()
-    test_img = torch.Tensor(val_imgs[test_idx]).to(device)
+    test_img = torch.Tensor(val_imgs[val_idx]).to(device)
     poses = val_poses
-    test_R = torch.Tensor(poses[test_idx, :3, :3]).to(device)
+    test_R = torch.Tensor(poses[val_idx, :3, :3]).to(device)
     test_ds = torch.einsum("ij,hwj->hwi", test_R, init_ds)
     test_os = (test_R @ init_o).expand(test_ds.shape)
-
-    # Initialize bins used to sample depths along a ray. See Equation (2) in Section 4.
-    t_i_c_gap = (t_f - t_n) / N_c
-    t_i_c_bin_edges = (t_n + torch.arange(N_c) * t_i_c_gap).to(device)
 
     # Initialize coarse and fine MLPs.
     F_c = get_model(device)
@@ -94,6 +90,10 @@ def main():
     optimizer = optim.Adam(list(F_c.parameters()) + list(F_f.parameters()), lr=lr)
     criterion = nn.MSELoss()
 
+    # Initialize bins used to sample depths along a ray. See Equation (2) in Section 4.
+    t_i_c_gap = (t_f - t_n) / N_c
+    t_i_c_bin_edges = (t_n + torch.arange(N_c) * t_i_c_gap).to(device)
+
     # Start training model.
     images = torch.Tensor(train_imgs)
     poses = torch.Tensor(train_poses)
@@ -101,7 +101,6 @@ def main():
     pixel_ps = torch.full((n_pix,), 1 / n_pix).to(device)
     psnrs = []
     iternums = []
-    # See Section 5.3.
     display_every = 1000
     F_c.train()
     F_f.train()

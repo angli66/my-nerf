@@ -82,6 +82,7 @@ def generate_prediction():
                 C_rs_f.append(C_rs_f_row)
                 depth_map.append(depth_map_row)
         C_rs_f = torch.vstack(C_rs_f)
+        C_rs_f = torch.clamp(C_rs_f, 0, 1)
         depth_map = torch.vstack(depth_map)
 
         plt.imsave(f"prediction/rgb_map_{i}.png", C_rs_f.detach().cpu().numpy())

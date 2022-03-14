@@ -194,6 +194,7 @@ def main():
                         )
                         C_rs_f.append(C_rs_f_row)
                 C_rs_f = torch.vstack(C_rs_f)
+                C_rs_f = torch.clamp(C_rs_f, 0, 1)
                 C_rs_fs.append(C_rs_f)
 
             eval_imgs = eval_imgs.to(device)
@@ -210,11 +211,11 @@ def main():
 
             # Visualization
             plt.figure(figsize=(16, 9), constrained_layout=True)
-            plt.suptitle(f"Iteration 1 to {i}")
+            plt.suptitle(f"Iteration 0 to {i}")
             plt.subplot(221)
             plt.title(f"Validation Image {eval_idx[0]} Ground Truth")
             plt.imshow(eval_imgs[0].detach().cpu().numpy())
-            plt.subplot(232)
+            plt.subplot(222)
             plt.title(f"Validation Image {eval_idx[0]} Predicted RGB Map")
             plt.imshow(C_rs_fs[0].detach().cpu().numpy())
             plt.subplot(223)
@@ -277,7 +278,9 @@ def main():
                 C_rs_f.append(C_rs_f_row)
                 depth_map.append(depth_map_row)
         C_rs_f = torch.vstack(C_rs_f)
+        C_rs_f = torch.clamp(C_rs_f, 0, 1)
         depth_map = torch.vstack(depth_map)
+        depth_map = torch.clamp(depth_map, 0, 1)
 
         plt.imsave(f"result/final_rgb_map_{i}.png", C_rs_f.detach().cpu().numpy())
         plt.imsave(f"result/final_depth_map_{i}.png", depth_map.detach().cpu().numpy())

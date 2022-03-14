@@ -12,6 +12,7 @@ import torch.nn as nn
 import torch.optim as optim
 import matplotlib.pyplot as plt
 
+import random
 import os as ops
 
 def run_one_iter_of_nerf(
@@ -31,6 +32,7 @@ def main():
     seed = 291
     torch.manual_seed(seed)
     np.random.seed(seed)
+    random.seed(seed)
 
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
     print(f'Using {device} device')
@@ -111,8 +113,10 @@ def main():
 
     # Log list
     iternums = []
+    train_losses = []
     val_losses = []
-    psnrs = []
+    train_psnrs = []
+    val_psnrs = []
 
     F_c.train()
     F_f.train()
@@ -178,9 +182,13 @@ def main():
         # Evaluation
         if i % eval_every == 0:
             # # Choose two random samples from validation set to use for evaluation.
-            eval_idx = torch.randint(0, 10, (2,))
-            eval_imgs = val_imgs[eval_idx]
-            eval_poses = val_poses[eval_idx]
+            eval_imgs = []
+            eval_poses = []
+            eval_idx = [random.randint(0, 189), random.randint(0, 9)]
+            eval_imgs.append(torch.Tensor(train_imgs[eval_idx[0]]))
+            eval_imgs.append(torch.Tensor(val_imgs[eval_idx[1]]))
+            eval_poses.append(torch.Tensor(train_poses[eval_idx[0]]))
+            eval_poses.append(torch.Tensor(val_poses[eval_idx[1]]))
             C_rs_fs = []
             F_c.eval()
             F_f.eval()
@@ -210,26 +218,25 @@ def main():
                 C_rs_f = torch.clamp(C_rs_f, 0, 1)
                 C_rs_fs.append(C_rs_f)
 
-            eval_imgs = eval_imgs.to(device)
             iternums.append(i)
-            loss_1 = criterion(C_rs_fs[0], eval_imgs[0])
-            loss_2 = criterion(C_rs_fs[1], eval_imgs[1])
-            val_loss = (loss_1.item() + loss_2.item()) / 2
-            val_losses.append(val_loss)
-            psnr_1 = -10.0 * torch.log10(loss_1)
-            psnr_2 = -10.0 * torch.log10(loss_2)
-            psnr = (psnr_1.item() + psnr_2.item()) / 2
-            psnrs.append(psnr)
-            print(f"Evaluated. validation loss: {val_loss}, validation psnr: {psnr}")
+            train_loss = criterion(C_rs_fs[0], eval_imgs[0].to(device))
+            val_loss = criterion(C_rs_fs[1], eval_imgs[1].to(device))
+            train_psnr = -10.0 * torch.log10(train_loss)
+            val_psnr = -10.0 * torch.log10(val_loss)
+            print(f"Evaluated. train loss: {train_loss.item()}, train psnr: {train_psnr.item()}, validation loss: {val_loss.item()}, validation psnr: {val_psnr.item()}")
+            train_losses.append(train_loss.item())
+            val_losses.append(val_loss.item())
+            train_psnrs.append(train_psnr.item())
+            val_psnrs.append(val_psnr.item())
 
             # Visualization
             plt.figure(figsize=(16, 9), constrained_layout=True)
             plt.suptitle(f"Iteration {iter_start} to {i}")
             plt.subplot(221)
-            plt.title(f"Validation Image {eval_idx[0]} Ground Truth")
+            plt.title(f"Train Image {eval_idx[0]} Ground Truth")
             plt.imshow(eval_imgs[0].detach().cpu().numpy())
             plt.subplot(222)
-            plt.title(f"Validation Image {eval_idx[0]} Predicted RGB Map")
+            plt.title(f"Train Image {eval_idx[0]} Predicted RGB Map")
             plt.imshow(C_rs_fs[0].detach().cpu().numpy())
             plt.subplot(223)
             plt.title(f"Validation Image {eval_idx[1]} Ground Truth")
@@ -241,12 +248,20 @@ def main():
             plt.close()
 
             plt.figure()
-            plt.plot(iternums, val_losses)
-            plt.savefig("log/validation_loss.png")
+            plt.title("Loss against Iteration")
+            plt.xlabel('Iteration')
+            plt.ylabel('Loss')
+            plt.plot(iternums, train_losses, label = 'train')
+            plt.plot(iternums, val_losses, label = 'val')
+            plt.savefig("log/loss.png")
             plt.close()
 
             plt.figure()
-            plt.plot(iternums, psnrs)
+            plt.title("PSNR against Iteration")
+            plt.xlabel('Iteration')
+            plt.ylabel('PSNR')
+            plt.plot(iternums, train_psnrs, label = 'train')
+            plt.plot(iternums, val_psnrs, label = 'val')
             plt.savefig("log/psnr.png")
             plt.close()
 
@@ -256,9 +271,6 @@ def main():
             # Save model
             torch.save(F_c.state_dict(), "log/model/latest_coarse.pt")
             torch.save(F_f.state_dict(), "log/model/latest_fine.pt")
-            if (len(val_losses) == 0 or val_loss <= min(val_losses)):
-                torch.save(F_c.state_dict(), "log/model/best_coarse.pt")
-                torch.save(F_f.state_dict(), "log/model/best_fine.pt")
 
     print("Training complete!")
 

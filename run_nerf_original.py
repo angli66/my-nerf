@@ -37,13 +37,13 @@ def main():
     
     # Hyperparameters
     # Training
-    iter_start = 300000
-    num_iters = 600000
-    eval_every = 10000
+    iter_start = 0
+    num_iters = 900000
+    eval_every = 100000
     chunk_size = 1024 * 64 # Number of query points passed through the MLP at a time
     batch_img_size = 32
     n_batch_pix = batch_img_size**2 # Number of training rays per iteration
-    lr = 1e-3
+    lr = 5e-4
     lrate_decay = 1000
     decay_steps = lrate_decay * 1000
     decay_rate = 0.1
@@ -60,16 +60,8 @@ def main():
         load_bottles_data(data_dir, opencv_format=False, low_res=False)
     focal, camera_dis = f_cd
     train_poses, train_imgs = train_set
-    val_poses_copy, val_imgs_copy = val_set
+    val_poses, val_imgs = val_set
     img_size = train_imgs.shape[1]
-
-    # Rearrange train set and validation set
-    val_to_use_idx = np.array([0, 10, 20, 30, 40, 50, 60, 70, 80, 90])
-    val_poses, val_imgs = val_poses_copy[val_to_use_idx], val_imgs_copy[val_to_use_idx]
-    val_poses_copy = np.delete(val_poses_copy, val_to_use_idx, axis=0)
-    val_imgs_copy = np.delete(val_imgs_copy, val_to_use_idx, axis=0)
-    train_poses = np.concatenate((train_poses, val_poses_copy), axis=0)
-    train_imgs = np.concatenate((train_imgs, val_imgs_copy), axis=0)
 
     # Set up initial ray origin (init_o) and ray directions (init_ds). These are the
     # same across samples, we just rotate them based on the orientation of the camera.
@@ -178,7 +170,7 @@ def main():
         # Evaluation
         if i % eval_every == 0:
             # # Choose two random samples from validation set to use for evaluation.
-            eval_idx = torch.randint(0, 10, (2,))
+            eval_idx = torch.randint(0, 100, (2,))
             eval_imgs = val_imgs[eval_idx]
             eval_poses = val_poses[eval_idx]
             C_rs_fs = []

@@ -249,6 +249,7 @@ def main():
             plt.ylabel('Loss')
             plt.plot(iternums, train_losses, label = 'train')
             plt.plot(iternums, val_losses, label = 'val')
+            plt.legend()
             plt.savefig("log/loss.png")
             plt.close()
 
@@ -258,6 +259,7 @@ def main():
             plt.ylabel('PSNR')
             plt.plot(iternums, train_psnrs, label = 'train')
             plt.plot(iternums, val_psnrs, label = 'val')
+            plt.legend()
             plt.savefig("log/psnr.png")
             plt.close()
 

@@ -130,7 +130,7 @@ def main():
     if not ops.path.isdir('result'):
         ops.makedirs('result')
     for i in range(iter_start, num_iters):
-        if i % 1000 == 0:
+        if i % 500 == 0:
             print(f"progress: {i}/{num_iters}")
         # Sample image and associated pose.
         target_img_idx = np.random.randint(images.shape[0])

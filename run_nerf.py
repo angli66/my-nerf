@@ -39,16 +39,16 @@ def main():
     
     # Hyperparameters
     # Training
-    iter_start = 300000
+    iter_start = 450000
     num_iters = 600000
-    eval_every = 10000
+    eval_every = 15000
     chunk_size = 1024 * 64 # Number of query points passed through the MLP at a time
-    batch_img_size = 32
+    batch_img_size = 58
     n_batch_pix = batch_img_size**2 # Number of training rays per iteration
-    lr = 1e-3
-    lrate_decay = 1000
-    decay_steps = lrate_decay * 1000
-    decay_rate = 0.1
+    lr = 5e-4
+    # lrate_decay = 1000
+    # decay_steps = lrate_decay * 1000
+    # decay_rate = 0.1
 
     # Volume rendering
     t_n = 1.0 # Near bound
@@ -176,12 +176,12 @@ def main():
 
         # Exponentially decay learning rate. See Section 5.3 and:
         # https://keras.io/api/optimizers/learning_rate_schedules/exponential_decay/.
-        for g in optimizer.param_groups:
-            g["lr"] = lr * decay_rate ** (i / decay_steps)
+        # for g in optimizer.param_groups:
+        #     g["lr"] = lr * decay_rate ** (i / decay_steps)
 
         # Evaluation
         if i % eval_every == 0:
-            # # Choose two random samples from validation set to use for evaluation.
+            # Choose two random samples from train set and validation set.
             eval_imgs = []
             eval_poses = []
             eval_idx = [random.randint(0, 189), random.randint(0, 9)]

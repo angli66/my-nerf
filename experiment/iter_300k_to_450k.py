@@ -39,13 +39,13 @@ def main():
     
     # Hyperparameters
     # Training
-    iter_start = 0
-    num_iters = 900000
-    eval_every = 100000
+    iter_start = 300000
+    num_iters = 600000
+    eval_every = 30000
     chunk_size = 1024 * 64 # Number of query points passed through the MLP at a time
-    batch_img_size = 58
+    batch_img_size = 32
     n_batch_pix = batch_img_size**2 # Number of training rays per iteration
-    lr = 5e-4
+    lr = 1e-3
     lrate_decay = 1000
     decay_steps = lrate_decay * 1000
     decay_rate = 0.1
@@ -62,8 +62,16 @@ def main():
         load_bottles_data(data_dir, opencv_format=False, low_res=False)
     focal, camera_dis = f_cd
     train_poses, train_imgs = train_set
-    val_poses, val_imgs = val_set
+    val_poses_copy, val_imgs_copy = val_set
     img_size = train_imgs.shape[1]
+
+    # Rearrange train set and validation set
+    val_to_use_idx = np.array([0, 10, 20, 30, 40, 50, 60, 70, 80, 90])
+    val_poses, val_imgs = val_poses_copy[val_to_use_idx], val_imgs_copy[val_to_use_idx]
+    val_poses_copy = np.delete(val_poses_copy, val_to_use_idx, axis=0)
+    val_imgs_copy = np.delete(val_imgs_copy, val_to_use_idx, axis=0)
+    train_poses = np.concatenate((train_poses, val_poses_copy), axis=0)
+    train_imgs = np.concatenate((train_imgs, val_imgs_copy), axis=0)
 
     # Set up initial ray origin (init_o) and ray directions (init_ds). These are the
     # same across samples, we just rotate them based on the orientation of the camera.
@@ -85,6 +93,10 @@ def main():
     # Initialize coarse and fine MLPs.
     F_c = get_model(device)
     F_f = get_model(device)
+
+    ######################## Load previous process ########################
+    F_c.load_state_dict(torch.load("log/model/latest_coarse.pt"))
+    F_f.load_state_dict(torch.load("log/model/latest_fine.pt"))
 
     # Initialize optimizer. See Section 5.3.
     optimizer = optim.Adam(list(F_c.parameters()) + list(F_f.parameters()), lr=lr)
@@ -172,7 +184,7 @@ def main():
             # Choose two random samples from train set and validation set.
             eval_imgs = []
             eval_poses = []
-            eval_idx = [random.randint(0, 99), random.randint(0, 99)]
+            eval_idx = [random.randint(0, 189), random.randint(0, 9)]
             eval_imgs.append(torch.Tensor(train_imgs[eval_idx[0]]))
             eval_imgs.append(torch.Tensor(val_imgs[eval_idx[1]]))
             eval_poses.append(torch.Tensor(train_poses[eval_idx[0]]))

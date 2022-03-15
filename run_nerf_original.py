@@ -40,13 +40,13 @@ def main():
     # Hyperparameters
     # Training
     iter_start = 0
-    num_iters = 900000
-    eval_every = 100000
+    num_iters = 100000
+    eval_every = 1000
     chunk_size = 1024 * 64 # Number of query points passed through the MLP at a time
     batch_img_size = 58
     n_batch_pix = batch_img_size**2 # Number of training rays per iteration
     lr = 5e-4
-    lrate_decay = 1000
+    lrate_decay = 250
     decay_steps = lrate_decay * 1000
     decay_rate = 0.1
 
@@ -59,7 +59,7 @@ def main():
     # Load dataset.
     data_dir = "./bottles"
     f_cd, train_set, val_set, test_poses = \
-        load_bottles_data(data_dir, opencv_format=False, low_res=False)
+        load_bottles_data(data_dir, opencv_format=False, low_res=True)
     focal, camera_dis = f_cd
     train_poses, train_imgs = train_set
     val_poses, val_imgs = val_set
@@ -118,7 +118,7 @@ def main():
     if not ops.path.isdir('result'):
         ops.makedirs('result')
     for i in range(iter_start, num_iters):
-        if i % 1000 == 0:
+        if i % 500 == 0:
             print(f"progress: {i}/{num_iters}")
         # Sample image and associated pose.
         target_img_idx = np.random.randint(images.shape[0])

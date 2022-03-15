@@ -34,7 +34,7 @@ def _get_imgs_from_dir(imgs_dir, low_res):
 
     return imgs
 
-def load_bottles_data(data_dir, opencv_format=False, low_res=False):
+def load_bottles_data(data_dir, opencv_format=True, low_res=False):
     print("Loading bottles data set...")
 
     # Load intrinsic matrix

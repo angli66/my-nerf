@@ -14,6 +14,7 @@ import matplotlib.pyplot as plt
 
 import random
 import os as ops
+from tqdm import tqdm, trange
 
 def run_one_iter_of_nerf(
     ds, N_c, t_i_c_bin_edges, t_i_c_gap, os, chunk_size, F_c, N_f, t_f, F_f
@@ -41,11 +42,12 @@ def main():
     # Training
     iter_start = 0
     num_iters = 100000
-    eval_every = 5000
+    print_loss_every = 100
+    eval_every = 10000
     chunk_size = 1024 * 64 # Number of query points passed through the MLP at a time
-    batch_img_size = 58
+    batch_img_size = 48
     n_batch_pix = batch_img_size**2 # Number of training rays per iteration
-    lr = 3e-4
+    lr = 5e-4
     lrate_decay = 200
     decay_steps = lrate_decay * 1000
     decay_rate = 0.1
@@ -59,19 +61,11 @@ def main():
     # Load dataset.
     data_dir = "./bottles"
     f_cd, train_set, val_set, test_poses = \
-        load_bottles_data(data_dir, opencv_format=False, low_res=False)
+        load_bottles_data(data_dir, opencv_format=True, low_res=False)
     focal, camera_dis = f_cd
     train_poses, train_imgs = train_set
-    val_poses_copy, val_imgs_copy = val_set
+    val_poses, val_imgs = val_set
     img_size = train_imgs.shape[1]
-
-    # Rearrange train set and validation set
-    val_to_use_idx = np.array([0, 10, 20, 30, 40, 50, 60, 70, 80, 90])
-    val_poses, val_imgs = val_poses_copy[val_to_use_idx], val_imgs_copy[val_to_use_idx]
-    val_poses_copy = np.delete(val_poses_copy, val_to_use_idx, axis=0)
-    val_imgs_copy = np.delete(val_imgs_copy, val_to_use_idx, axis=0)
-    train_poses = np.concatenate((train_poses, val_poses_copy), axis=0)
-    train_imgs = np.concatenate((train_imgs, val_imgs_copy), axis=0)
 
     # Set up initial ray origin (init_o) and ray directions (init_ds). These are the
     # same across samples, we just rotate them based on the orientation of the camera.
@@ -94,10 +88,6 @@ def main():
     F_c = get_model(device)
     F_f = get_model(device)
 
-    ######################## Load previous process ########################
-    F_c.load_state_dict(torch.load("log/model/latest_coarse.pt"))
-    F_f.load_state_dict(torch.load("log/model/latest_fine.pt"))
-
     # Initialize optimizer. See Section 5.3.
     optimizer = optim.Adam(list(F_c.parameters()) + list(F_f.parameters()), lr=lr)
     criterion = nn.MSELoss()
@@ -112,6 +102,7 @@ def main():
     pixel_ps = torch.full((n_pix,), 1 / n_pix).to(device)
 
     # Log list
+    running_loss = 0
     iternums = []
     train_losses = []
     val_losses = []
@@ -129,9 +120,12 @@ def main():
         ops.makedirs('log/model')
     if not ops.path.isdir('result'):
         ops.makedirs('result')
-    for i in range(iter_start, num_iters):
-        if i % 500 == 0:
-            print(f"progress: {i}/{num_iters}")
+    for i in trange(iter_start, num_iters):
+        # Print progress
+        if i != 0 and i % print_loss_every == 0:
+            tqdm.write(f"Training loss: {running_loss / print_loss_every}")
+            running_loss = 0
+
         # Sample image and associated pose.
         target_img_idx = np.random.randint(images.shape[0])
         target_pose = poses[target_img_idx].to(device)
@@ -173,6 +167,7 @@ def main():
         optimizer.zero_grad()
         loss.backward()
         optimizer.step()
+        running_loss += loss.item()
 
         # Exponentially decay learning rate. See Section 5.3 and:
         # https://keras.io/api/optimizers/learning_rate_schedules/exponential_decay/.
@@ -181,10 +176,11 @@ def main():
 
         # Evaluation
         if i % eval_every == 0:
+            tqdm.write("Evaluating...")
             # Choose two random samples from train set and validation set.
             eval_imgs = []
             eval_poses = []
-            eval_idx = [random.randint(0, 189), random.randint(0, 9)]
+            eval_idx = [random.randint(0, 99), random.randint(0, 99)]
             eval_imgs.append(torch.Tensor(train_imgs[eval_idx[0]]))
             eval_imgs.append(torch.Tensor(val_imgs[eval_idx[1]]))
             eval_poses.append(torch.Tensor(train_poses[eval_idx[0]]))
@@ -223,7 +219,7 @@ def main():
             val_loss = criterion(C_rs_fs[1], eval_imgs[1].to(device))
             train_psnr = -10.0 * torch.log10(train_loss)
             val_psnr = -10.0 * torch.log10(val_loss)
-            print(f"Evaluated. train loss: {train_loss.item()}, train psnr: {train_psnr.item()}, validation loss: {val_loss.item()}, validation psnr: {val_psnr.item()}")
+            tqdm.write(f"Evaluated.\nloss on train image: {train_loss.item()}\npsnr on train image: {train_psnr.item()}\nloss on validation image: {val_loss.item()}\npsnr on validation image: {val_psnr.item()}")
             train_losses.append(train_loss.item())
             val_losses.append(val_loss.item())
             train_psnrs.append(train_psnr.item())

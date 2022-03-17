@@ -45,6 +45,9 @@ def main():
     # Use a larger training set and smaller validation set
     larger_training_set = False
 
+    # Whether to enable positional encoding
+    positional_encoding = False
+
     # Training
     iter_start = 0 + 1
     num_iters = 200000 + 1
@@ -104,8 +107,8 @@ def main():
     t_i_c_bin_edges = (t_n + torch.arange(N_c) * t_i_c_gap).to(device)
 
     # Initialize coarse and fine MLPs.
-    F_c = get_model(device)
-    F_f = get_model(device)
+    F_c = get_model(device, positional_encoding)
+    F_f = get_model(device, positional_encoding)
 
     if resume:
         print("Loading previous model...")

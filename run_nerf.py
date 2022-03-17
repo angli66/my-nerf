@@ -39,10 +39,16 @@ def main():
     print(f'Using {device} device')
     
     # Hyperparameters
+    # Load previous progress
+    resume = False
+
+    # Use a larger training set and smaller validation set
+    larger_training_set = False
+
     # Training
-    iter_start = 0
-    num_iters = 100000
-    print_loss_every = 100
+    iter_start = 0 + 1
+    num_iters = 200000 + 1
+    print_loss_every = 1000
     eval_every = 10000
     chunk_size = 1024 * 64 # Number of query points passed through the MLP at a time
     batch_img_size = 48
@@ -67,6 +73,19 @@ def main():
     val_poses, val_imgs = val_set
     img_size = train_imgs.shape[1]
 
+    if larger_training_set:
+        # Rearrange train set and validation set
+        val_to_use_idx = np.array([0, 10, 20, 30, 40, 50, 60, 70, 80, 90])
+        val_poses_copy, val_imgs_copy = val_set
+        val_poses, val_imgs = val_poses_copy[val_to_use_idx], val_imgs_copy[val_to_use_idx]
+        val_poses_copy = np.delete(val_poses_copy, val_to_use_idx, axis=0)
+        val_imgs_copy = np.delete(val_imgs_copy, val_to_use_idx, axis=0)
+        train_poses = np.concatenate((train_poses, val_poses_copy), axis=0)
+        train_imgs = np.concatenate((train_imgs, val_imgs_copy), axis=0)
+        print("Using larger training set")
+        print(f"train set length: {len(train_imgs)}")
+        print(f"validation set length: {len(val_imgs)}")
+
     # Set up initial ray origin (init_o) and ray directions (init_ds). These are the
     # same across samples, we just rotate them based on the orientation of the camera.
     # See Section 4.
@@ -87,6 +106,12 @@ def main():
     # Initialize coarse and fine MLPs.
     F_c = get_model(device)
     F_f = get_model(device)
+
+    if resume:
+        print("Loading previous model...")
+        # Load previous model
+        F_c.load_state_dict(torch.load("log/model/latest_coarse.pt"))
+        F_f.load_state_dict(torch.load("log/model/latest_fine.pt"))
 
     # Initialize optimizer. See Section 5.3.
     optimizer = optim.Adam(list(F_c.parameters()) + list(F_f.parameters()), lr=lr)
@@ -122,7 +147,7 @@ def main():
         ops.makedirs('result')
     for i in trange(iter_start, num_iters):
         # Print progress
-        if i != 0 and i % print_loss_every == 0:
+        if i != iter_start and i % print_loss_every == 0:
             tqdm.write(f"Training loss: {running_loss / print_loss_every}")
             running_loss = 0
 
@@ -180,7 +205,10 @@ def main():
             # Choose two random samples from train set and validation set.
             eval_imgs = []
             eval_poses = []
-            eval_idx = [random.randint(0, 99), random.randint(0, 99)]
+            if not larger_training_set:
+                eval_idx = [random.randint(0, 99), random.randint(0, 99)]
+            else:
+                eval_idx = [random.randint(0, 189), random.randint(0, 9)]
             eval_imgs.append(torch.Tensor(train_imgs[eval_idx[0]]))
             eval_imgs.append(torch.Tensor(val_imgs[eval_idx[1]]))
             eval_poses.append(torch.Tensor(train_poses[eval_idx[0]]))
@@ -227,7 +255,7 @@ def main():
 
             # Visualization
             plt.figure(figsize=(16, 9), constrained_layout=True)
-            plt.suptitle(f"Iteration {iter_start} to {i}")
+            plt.suptitle(f"Iteration {i}")
             plt.subplot(221)
             plt.title(f"Train Image {eval_idx[0]} Ground Truth")
             plt.imshow(eval_imgs[0].detach().cpu().numpy())
@@ -240,7 +268,7 @@ def main():
             plt.subplot(224)
             plt.title(f"Validation Image {eval_idx[1]} Predicted RGB Map")
             plt.imshow(C_rs_fs[1].detach().cpu().numpy())
-            plt.savefig(f"log/evaluation/iter_{i}_evaluation.png")
+            plt.savefig(f"log/evaluation/iter_{i}.png")
             plt.close()
 
             plt.figure()

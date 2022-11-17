@@ -18,6 +18,4 @@ An example groundtruth image from the test set:
 Prediction of the model of a novel view:
 ![pred](result/2_test_0160.png)
 
-There are still some noises and the non-lambertian material is not perfectly reproduced, but the generally realistic results have demonstrated the great potential of NeRF.
-
-According to the feedback of my final project, the average PSNR of the 5 novel views is 28.85.
+There are still some noises and the non-lambertian material is not perfectly reproduced. According to the feedback of my final project, the average PSNR of the 5 novel views is 28.85.
